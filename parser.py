@@ -1,9 +1,3 @@
-"""
-parser.py
-
-Obtém a página da FLUL e extrai os procedimentos concursais.
-"""
-
 import logging
 import time
 from urllib.parse import urljoin
@@ -11,11 +5,7 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
-from config import (
-    URL,
-    USER_AGENT,
-    REQUEST_TIMEOUT,
-)
+from config import URL, USER_AGENT, REQUEST_TIMEOUT
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,9 +17,9 @@ HEADERS = {
 }
 
 
-def obter_html():
+def obter_html(url):
     """
-    Descarrega a página com até 3 tentativas.
+    Descarrega uma página com até 3 tentativas.
     """
 
     ultimo_erro = None
@@ -38,20 +28,15 @@ def obter_html():
 
         try:
 
-            logging.info(
-                "A descarregar página (tentativa %d)...",
-                tentativa + 1,
-            )
+            logging.info("A abrir %s", url)
 
             resposta = requests.get(
-                URL,
+                url,
                 headers=HEADERS,
-                timeout=REQUEST_TIMEOUT,
+                timeout=REQUEST_TIMEOUT
             )
 
             resposta.raise_for_status()
-
-            logging.info("Página descarregada.")
 
             return resposta.text
 
@@ -61,7 +46,7 @@ def obter_html():
 
             logging.warning(
                 "Tentativa %d falhou.",
-                tentativa + 1,
+                tentativa + 1
             )
 
             time.sleep(5)
@@ -70,55 +55,89 @@ def obter_html():
 
 
 def limpar(texto):
-    """
-    Remove espaços duplicados.
-    """
 
     return " ".join(texto.split())
 
 
-def link_relevante(texto, href):
+def obter_categorias():
+
     """
-    Decide se uma ligação pode corresponder
-    a um procedimento concursal.
-    """
+    Procura automaticamente as categorias
+    de concursos existentes na página principal.
 
-    texto = texto.lower()
-    href = href.lower()
-
-    palavras = (
-        "concurso",
-        "procedimento",
-        "recrutamento",
-        "edital",
-        "aviso",
-    )
-
-    if any(p in texto for p in palavras):
-        return True
-
-    if href.endswith(".pdf"):
-        return True
-
-    return False
-
-
-def extrair_concursos():
-    """
-    Extrai os concursos da página.
-
-    Resultado:
+    Devolve uma lista:
 
     [
         {
-            "titulo": "...",
-            "link": "...",
-            "descricao": "..."
+            "categoria": "...",
+            "link": "..."
         }
     ]
     """
 
-    html = obter_html()
+    html = obter_html(URL)
+
+    soup = BeautifulSoup(html, "lxml")
+
+    categorias = []
+
+    vistos = set()
+
+    for a in soup.find_all("a", href=True):
+
+        texto = limpar(a.get_text())
+
+        href = a["href"].strip()
+
+        if not texto:
+            continue
+
+        texto_lower = texto.lower()
+
+        if any(x in texto_lower for x in (
+            "docentes",
+            "investigadores",
+            "técnicos",
+            "tecnicos",
+            "dl 57",
+            "projetos",
+            "projectos"
+        )):
+
+            link = urljoin(URL, href)
+
+            if link in vistos:
+                continue
+
+            vistos.add(link)
+
+            categorias.append({
+
+                "categoria": texto,
+
+                "link": link
+
+            })
+
+    logging.info(
+        "Encontradas %d categorias.",
+        len(categorias)
+    )
+
+    return categorias
+
+
+def extrair_concursos_categoria(categoria):
+
+    """
+    Recebe uma categoria e devolve todos
+    os concursos dessa categoria.
+
+    Esta função será completada
+    na segunda parte.
+    """
+
+    html = obter_html(categoria["link"])
 
     soup = BeautifulSoup(html, "lxml")
 
@@ -126,7 +145,7 @@ def extrair_concursos():
 
     vistos = set()
 
-    for a in soup.find_all("a", href=True):
+        for a in soup.find_all("a", href=True):
 
         href = a["href"].strip()
 
@@ -137,14 +156,11 @@ def extrair_concursos():
         if not texto:
             continue
 
-        if not link_relevante(texto, href):
-            continue
-
-        link = urljoin(URL, href)
+        link = urljoin(categoria["link"], href)
 
         chave = (
             texto.lower(),
-            link.lower(),
+            link.lower()
         )
 
         if chave in vistos:
@@ -152,21 +168,81 @@ def extrair_concursos():
 
         vistos.add(chave)
 
-        concursos.append(
-            {
-                "titulo": texto,
-                "link": link,
-                "descricao": texto,
-            }
+        if (
+            link.lower().endswith(".pdf")
+            or "/document/" in link.lower()
+            or "/doc_download/" in link.lower()
+        ):
+
+            concursos.append(
+                {
+                    "categoria": categoria["categoria"],
+                    "titulo": texto,
+                    "descricao": texto,
+                    "link": link
+                }
+            )
+
+    return concursos
+
+
+def extrair_concursos():
+
+    """
+    Extrai todos os concursos
+    de todas as categorias.
+    """
+
+    categorias = obter_categorias()
+
+    concursos = []
+
+    vistos = set()
+
+    for categoria in categorias:
+
+        logging.info(
+            "A analisar %s...",
+            categoria["categoria"]
         )
 
+        try:
+
+            lista = extrair_concursos_categoria(
+                categoria
+            )
+
+            for concurso in lista:
+
+                chave = (
+                    concurso["titulo"].lower(),
+                    concurso["link"].lower()
+                )
+
+                if chave in vistos:
+                    continue
+
+                vistos.add(chave)
+
+                concursos.append(concurso)
+
+        except Exception as erro:
+
+            logging.exception(
+                "Erro ao analisar %s",
+                categoria["categoria"]
+            )
+
     concursos.sort(
-        key=lambda c: c["titulo"].lower()
+        key=lambda x: (
+            x["categoria"].lower(),
+            x["titulo"].lower()
+        )
     )
 
     logging.info(
         "%d concursos encontrados.",
-        len(concursos),
+        len(concursos)
     )
 
     return concursos
@@ -179,6 +255,10 @@ if __name__ == "__main__":
     for concurso in concursos:
 
         print()
+
+        print(
+            f"[{concurso['categoria']}]"
+        )
 
         print(concurso["titulo"])
 
