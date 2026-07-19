@@ -1,15 +1,26 @@
 """
 parser.py
 
-Obtém a página da FLUL e extrai a lista de concursos.
+Obtém a página da FLUL e extrai os procedimentos concursais.
 """
 
+import logging
+import time
 from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
 
-from config import REQUEST_TIMEOUT, URL, USER_AGENT
+from config import (
+    URL,
+    USER_AGENT,
+    REQUEST_TIMEOUT,
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
 
 HEADERS = {
     "User-Agent": USER_AGENT
@@ -17,33 +28,94 @@ HEADERS = {
 
 
 def obter_html():
-    """Descarrega a página."""
-    resposta = requests.get(
-        URL,
-        headers=HEADERS,
-        timeout=REQUEST_TIMEOUT,
-    )
+    """
+    Descarrega a página com até 3 tentativas.
+    """
 
-    resposta.raise_for_status()
-    return resposta.text
+    ultimo_erro = None
+
+    for tentativa in range(3):
+
+        try:
+
+            logging.info(
+                "A descarregar página (tentativa %d)...",
+                tentativa + 1,
+            )
+
+            resposta = requests.get(
+                URL,
+                headers=HEADERS,
+                timeout=REQUEST_TIMEOUT,
+            )
+
+            resposta.raise_for_status()
+
+            logging.info("Página descarregada.")
+
+            return resposta.text
+
+        except Exception as erro:
+
+            ultimo_erro = erro
+
+            logging.warning(
+                "Tentativa %d falhou.",
+                tentativa + 1,
+            )
+
+            time.sleep(5)
+
+    raise ultimo_erro
 
 
 def limpar(texto):
-    """Remove espaços repetidos."""
+    """
+    Remove espaços duplicados.
+    """
+
     return " ".join(texto.split())
+
+
+def link_relevante(texto, href):
+    """
+    Decide se uma ligação pode corresponder
+    a um procedimento concursal.
+    """
+
+    texto = texto.lower()
+    href = href.lower()
+
+    palavras = (
+        "concurso",
+        "procedimento",
+        "recrutamento",
+        "edital",
+        "aviso",
+    )
+
+    if any(p in texto for p in palavras):
+        return True
+
+    if href.endswith(".pdf"):
+        return True
+
+    return False
 
 
 def extrair_concursos():
     """
-    Devolve uma lista de concursos.
+    Extrai os concursos da página.
 
-    Cada concurso tem a forma:
+    Resultado:
 
-    {
-        "titulo": "...",
-        "link": "...",
-        "descricao": "..."
-    }
+    [
+        {
+            "titulo": "...",
+            "link": "...",
+            "descricao": "..."
+        }
+    ]
     """
 
     html = obter_html()
@@ -54,35 +126,26 @@ def extrair_concursos():
 
     vistos = set()
 
-    # Procuramos todas as ligações da página.
-    # A página da FLUL costuma publicar cada concurso como um PDF ou uma página.
-
     for a in soup.find_all("a", href=True):
 
         href = a["href"].strip()
 
-        texto = limpar(a.get_text(" ", strip=True))
+        texto = limpar(
+            a.get_text(" ", strip=True)
+        )
 
         if not texto:
             continue
 
-        href_lower = href.lower()
-
-        texto_lower = texto.lower()
-
-        # Filtrar apenas ligações relevantes
-        if not (
-            ".pdf" in href_lower
-            or "concurso" in texto_lower
-            or "procedimento" in texto_lower
-            or "recrutamento" in texto_lower
-            or "edital" in texto_lower
-        ):
+        if not link_relevante(texto, href):
             continue
 
         link = urljoin(URL, href)
 
-        chave = (texto, link)
+        chave = (
+            texto.lower(),
+            link.lower(),
+        )
 
         if chave in vistos:
             continue
@@ -97,14 +160,26 @@ def extrair_concursos():
             }
         )
 
-    concursos.sort(key=lambda x: x["titulo"])
+    concursos.sort(
+        key=lambda c: c["titulo"].lower()
+    )
+
+    logging.info(
+        "%d concursos encontrados.",
+        len(concursos),
+    )
 
     return concursos
 
 
 if __name__ == "__main__":
 
-    for concurso in extrair_concursos():
+    concursos = extrair_concursos()
+
+    for concurso in concursos:
+
+        print()
+
         print(concurso["titulo"])
+
         print(concurso["link"])
-        print("-" * 60)
