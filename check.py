@@ -1,35 +1,60 @@
-import json
-import requests
-from bs4 import BeautifulSoup
+"""
+check.py
 
-URL = "https://www.letras.ulisboa.pt/pt/sobre-a-flul/administracao-e-servicos/recursos-humanos/procedimentos-concursais/ano-de-2026"
+Programa principal.
+"""
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+import traceback
 
-
-def obter_html():
-    resposta = requests.get(URL, headers=HEADERS, timeout=30)
-    resposta.raise_for_status()
-    return resposta.text
-
-
-def extrair_concursos(html):
-    soup = BeautifulSoup(html, "lxml")
-
-    # Vamos implementar esta função no próximo passo
-    concursos = []
-
-    return concursos
+from parser import extrair_concursos
+from storage import atualizar, novos
+from mail import enviar_email
 
 
 def main():
-    html = obter_html()
-    concursos = extrair_concursos(html)
 
-    print(f"Foram encontrados {len(concursos)} concursos.")
+    print("=" * 60)
+    print("Monitor FLUL")
+    print("=" * 60)
+
+    concursos = extrair_concursos()
+
+    print(f"Foram encontrados {len(concursos)} concursos na página.")
+
+    if not concursos:
+        print("Nenhum concurso encontrado.")
+        return
+
+    concursos_novos = novos(concursos)
+
+    if concursos_novos:
+
+        print(f"Foram encontrados {len(concursos_novos)} concursos novos.")
+
+        enviar_email(concursos_novos)
+
+    else:
+
+        print("Não existem concursos novos.")
+
+    atualizar(concursos)
+
+    print("Histórico atualizado.")
 
 
 if __name__ == "__main__":
-    main()
+
+    try:
+        main()
+
+    except Exception:
+
+        print()
+
+        print("=" * 60)
+        print("ERRO")
+        print("=" * 60)
+
+        traceback.print_exc()
+
+        raise
