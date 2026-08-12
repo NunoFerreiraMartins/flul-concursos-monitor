@@ -2,9 +2,7 @@ name: Monitor Concursos FLUL
 
 on:
   schedule:
-    # Executa todos os dias às 08:00 UTC (09:00 em Portugal no inverno, 10:00 no verão)
     - cron: "0 8 * * *"
-
   workflow_dispatch:
 
 permissions:
@@ -12,16 +10,17 @@ permissions:
 
 jobs:
   monitor:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: true
 
       - name: Configurar Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
